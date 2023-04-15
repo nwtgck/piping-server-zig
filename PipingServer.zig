@@ -19,15 +19,13 @@ fn getPipe(self: *@This(), path: []const u8) !Pipe {
     // TODO: better lock
     self.path_to_pipe_mutex.lock();
     defer self.path_to_pipe_mutex.unlock();
-    var pipe = self.path_to_pipe.get(path);
-    if (pipe == null) {
+    return self.path_to_pipe.get(path) orelse {
         var chan_ptr = try self.allocator.create(BlockingOneshotChannel(*std.http.Server.Response));
         chan_ptr.* = BlockingOneshotChannel(*std.http.Server.Response).init();
         const new_pipe = Pipe{ .receiver_res_channel = chan_ptr };
         try self.path_to_pipe.put(path, new_pipe);
-        pipe = new_pipe;
-    }
-    return pipe orelse unreachable;
+        return new_pipe;
+    };
 }
 
 fn removePipe(self: *@This(), path: []const u8) void {
