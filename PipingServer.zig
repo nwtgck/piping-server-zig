@@ -77,8 +77,14 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
         _ = try res.write("[INFO] A receiver was connected.\n");
         _ = try res.write("[INFO] Start sending to 1 receiver(s)!\n");
 
-        receiver_res.headers.transfer_encoding = .chunked;
-        receiver_res.headers.connection = res.request.headers.connection;
+        // TODO: How to inline .chunked?
+        const chunked: ?std.http.TransferEncoding = .chunked;
+        if (res.request.headers.transfer_encoding == chunked) {
+            receiver_res.headers.transfer_encoding = .chunked;
+        } else if (res.request.headers.content_length) |sender_content_length| {
+            receiver_res.headers.transfer_encoding = .{ .content_length = sender_content_length };
+        }
+        receiver_res.headers.connection = receiver_res.request.headers.connection;
         try receiver_res.do();
 
         var buf: [65536]u8 = undefined;
