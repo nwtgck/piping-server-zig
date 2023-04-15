@@ -32,7 +32,10 @@ fn removePipe(self: *@This(), path: []const u8) void {
     // TODO: better lock
     self.path_to_pipe_mutex.lock();
     defer self.path_to_pipe_mutex.unlock();
-    _ = self.path_to_pipe.remove(path);
+    const pipe: ?Pipe = self.path_to_pipe.fetchRemove(path).?.value;
+    if (pipe) |pipe2| {
+        self.allocator.destroy(pipe2.receiver_res_channel);
+    }
 }
 
 pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
