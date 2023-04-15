@@ -1,0 +1,36 @@
+name: CI
+
+on: [push]
+
+env:
+  ZIG_VERSION: 0.11.0-dev.2613+b42562be7
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install zig
+      run: |
+        set -xeu
+        cd /usr/local/bin/
+        curl -L https://ziglang.org/builds/zig-linux-x86_64-${ZIG_VERSION}.tar.xz | sudo tar xJf -
+        echo "PATH=$PATH:/usr/local/bin/zig-linux-x86_64-${ZIG_VERSION}" >> $GITHUB_ENV
+    - run: zig build-exe main.zig
+    - name: Operational test
+      run: |
+        set -xeu
+        # Start server
+        ./main &> server.log &
+        sleep 2
+        curl -sS localhost:8080
+
+        seq 100 > data.txt
+        # TODO: Need `|| true` because of "curl: (18) transfer closed with outstanding read data remaining"
+        (cat data.txt | curl -sST- localhost:8080/mypath || true) &
+        (curl -sS localhost:8080/mypath || true) > data_transferred.txt
+        diff data.txt data_transferred.txt
+        cat data_transferred.txt
+      timeout-minutes: 1
+    - if: ${{ always() }}
+      run: cat server.log
