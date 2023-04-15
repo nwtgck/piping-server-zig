@@ -57,6 +57,7 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
         // Send respose header
         try res.do();
         _ = try res.write(body);
+        try res.finish();
         res.reset();
         return;
     }
