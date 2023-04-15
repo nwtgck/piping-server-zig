@@ -38,6 +38,7 @@ fn removePipe(self: *@This(), path: []const u8) void {
     }
 }
 
+// TODO: close detection and handle it
 pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     errdefer res.reset();
 
@@ -45,8 +46,11 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     try res.wait();
     std.debug.print("{} {s}\n", .{ res.request.headers.method, res.request.headers.target });
 
+    // TODO: Remove query parameters like ?n=...
+    const path = res.request.headers.target;
+
     // Top page
-    if (res.request.headers.method == .GET and std.mem.eql(u8, res.request.headers.target, "/")) {
+    if (res.request.headers.method == .GET and std.mem.eql(u8, path, "/")) {
         const body: []const u8 = "Piping Server in Zig (experimental)\n";
         res.headers.custom = &[_]std.http.CustomHeader{.{
             .name = "Content-Type",
@@ -65,7 +69,7 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     // Handle sender
     if (res.request.headers.method == .POST or res.request.headers.method == .PUT) {
         std.debug.print("handling sender {s} ...\n", .{res.request.headers.target});
-        var pipe = try self.getPipe(res.request.headers.target);
+        var pipe = try self.getPipe(path);
         res.headers.transfer_encoding = .chunked;
         res.headers.connection = res.request.headers.connection;
         // Send respose header
@@ -73,7 +77,7 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
         _ = try res.write("[INFO] Waiting for 1 receiver(s)...\n");
         const receiver_res: *std.http.Server.Response = pipe.receiver_res_channel.get();
         // TODO: consider timing of removinig
-        self.removePipe(res.request.headers.target);
+        self.removePipe(path);
         _ = try res.write("[INFO] A receiver was connected.\n");
         _ = try res.write("[INFO] Start sending to 1 receiver(s)!\n");
 
@@ -85,6 +89,7 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
             receiver_res.headers.transfer_encoding = .{ .content_length = sender_content_length };
         }
         receiver_res.headers.connection = receiver_res.request.headers.connection;
+        // TODO: Transfer Content-Type
         try receiver_res.do();
 
         var buf: [65536]u8 = undefined;
@@ -118,7 +123,7 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     // Handle receiver
     if (res.request.headers.method == .GET) {
         std.debug.print("handling receiver {s} ...\n", .{res.request.headers.target});
-        var pipe = try self.getPipe(res.request.headers.target);
+        var pipe = try self.getPipe(path);
         pipe.receiver_res_channel.put(res);
         return;
     }
