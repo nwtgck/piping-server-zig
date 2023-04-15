@@ -26,9 +26,8 @@ jobs:
         curl -sS localhost:8080
 
         seq 100 > data.txt
-        # TODO: Need `|| true` because of "curl: (18) transfer closed with outstanding read data remaining"
-        (cat data.txt | curl -sST- localhost:8080/mypath || true) &
-        (curl -sS localhost:8080/mypath || true) > data_transferred.txt
+        cat data.txt | curl -sST- localhost:8080/mypath &
+        curl -sS localhost:8080/mypath > data_transferred.txt
         diff data.txt data_transferred.txt
         cat data_transferred.txt
       timeout-minutes: 1
