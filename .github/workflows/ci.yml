@@ -16,6 +16,9 @@ jobs:
         cd /usr/local/bin/
         curl -L https://ziglang.org/builds/zig-linux-x86_64-${ZIG_VERSION}.tar.xz | sudo tar xJf -
         echo "PATH=$PATH:/usr/local/bin/zig-linux-x86_64-${ZIG_VERSION}" >> $GITHUB_ENV
+    - name: Test
+      run: find . -name '*.zig' | xargs -I{} zig test {}
+      timeout-minutes: 1
     - run: zig build-exe main.zig
     - name: Operational test
       run: |
