@@ -20,7 +20,7 @@ fn getPipe(self: *@This(), path: []const u8) !Pipe {
     self.path_to_pipe_mutex.lock();
     defer self.path_to_pipe_mutex.unlock();
     return self.path_to_pipe.get(path) orelse {
-        var chan_ptr = try self.allocator.create(BlockingChannel(*std.http.Server.Response));
+        const chan_ptr = try self.allocator.create(BlockingChannel(*std.http.Server.Response));
         chan_ptr.* = BlockingChannel(*std.http.Server.Response).init();
         const new_pipe = Pipe{ .receiver_res_channel = chan_ptr };
         try self.path_to_pipe.put(path, new_pipe);
@@ -69,7 +69,7 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     // Handle sender
     if (res.request.headers.method == .POST or res.request.headers.method == .PUT) {
         std.debug.print("handling sender {s} ...\n", .{res.request.headers.target});
-        var pipe = try self.getPipe(path);
+        const pipe = try self.getPipe(path);
         res.headers.transfer_encoding = .chunked;
         res.headers.connection = res.request.headers.connection;
         // Send respose header
@@ -119,7 +119,7 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     // Handle receiver
     if (res.request.headers.method == .GET) {
         std.debug.print("handling receiver {s} ...\n", .{res.request.headers.target});
-        var pipe = try self.getPipe(path);
+        const pipe = try self.getPipe(path);
         pipe.receiver_res_channel.put(res);
         return;
     }
