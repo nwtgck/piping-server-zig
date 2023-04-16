@@ -1,7 +1,7 @@
 const std = @import("std");
-const BlockingOneshotChannel = @import("./BlockingOneshotChannel.zig").BlockingOneshotChannel;
+const BlockingChannel = @import("./blocking_channel.zig").BlockingChannel;
 
-const Pipe = struct { receiver_res_channel: *BlockingOneshotChannel(*std.http.Server.Response) };
+const Pipe = struct { receiver_res_channel: *BlockingChannel(*std.http.Server.Response) };
 
 allocator: std.mem.Allocator,
 path_to_pipe: std.StringHashMap(Pipe),
@@ -20,8 +20,8 @@ fn getPipe(self: *@This(), path: []const u8) !Pipe {
     self.path_to_pipe_mutex.lock();
     defer self.path_to_pipe_mutex.unlock();
     return self.path_to_pipe.get(path) orelse {
-        var chan_ptr = try self.allocator.create(BlockingOneshotChannel(*std.http.Server.Response));
-        chan_ptr.* = BlockingOneshotChannel(*std.http.Server.Response).init();
+        var chan_ptr = try self.allocator.create(BlockingChannel(*std.http.Server.Response));
+        chan_ptr.* = BlockingChannel(*std.http.Server.Response).init();
         const new_pipe = Pipe{ .receiver_res_channel = chan_ptr };
         try self.path_to_pipe.put(path, new_pipe);
         return new_pipe;
