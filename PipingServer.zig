@@ -125,7 +125,7 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     }
 }
 
-// TODO: Replace this entire function to the res.transferRead() if `piping-server --http1.1 --server-schemaless-url //localhost:8080 --check post_first_byte_by_byte_streaming` works
+// TODO: Replace this entire function to the res.transferRead() if `piping-server-check --http1.1 --server-schemaless-url //localhost:8080 --check post_first_byte_by_byte_streaming` works
 fn workaroundTransferRead(res: *std.http.Server.Response, buf: []u8) !usize {
     if (res.request.parser.isComplete()) return 0;
 
