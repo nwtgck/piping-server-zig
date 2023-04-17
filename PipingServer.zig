@@ -46,11 +46,10 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     try res.wait();
     std.debug.print("{} {s}\n", .{ res.request.headers.method, res.request.headers.target });
 
-    // TODO: Remove query parameters like ?n=...
-    const path = res.request.headers.target;
+    const uri = try std.Uri.parseWithoutScheme(res.request.headers.target);
 
     // Top page
-    if (res.request.headers.method == .GET and std.mem.eql(u8, path, "/")) {
+    if (res.request.headers.method == .GET and std.mem.eql(u8, uri.path, "/")) {
         const body: []const u8 = "Piping Server in Zig (experimental)\n";
         res.headers.custom = &[_]std.http.CustomHeader{.{
             .name = "Content-Type",
@@ -69,7 +68,7 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     // Handle sender
     if (res.request.headers.method == .POST or res.request.headers.method == .PUT) {
         std.debug.print("handling sender {s} ...\n", .{res.request.headers.target});
-        const pipe = try self.getPipe(path);
+        const pipe = try self.getPipe(uri.path);
         res.headers.transfer_encoding = .chunked;
         res.headers.connection = res.request.headers.connection;
         // Send respose header
@@ -77,7 +76,7 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
         _ = try res.write("[INFO] Waiting for 1 receiver(s)...\n");
         const receiver_res: *std.http.Server.Response = pipe.receiver_res_channel.get();
         // TODO: consider timing of removinig
-        self.removePipe(path);
+        self.removePipe(uri.path);
         _ = try res.write("[INFO] A receiver was connected.\n");
         _ = try res.write("[INFO] Start sending to 1 receiver(s)!\n");
 
@@ -119,7 +118,7 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     // Handle receiver
     if (res.request.headers.method == .GET) {
         std.debug.print("handling receiver {s} ...\n", .{res.request.headers.target});
-        const pipe = try self.getPipe(path);
+        const pipe = try self.getPipe(uri.path);
         pipe.receiver_res_channel.put(res);
         return;
     }
