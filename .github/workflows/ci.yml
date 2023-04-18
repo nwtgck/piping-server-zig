@@ -3,7 +3,7 @@ name: CI
 on: [push]
 
 env:
-  ZIG_VERSION: 0.11.0-dev.2639+4df87b40f
+  ZIG_VERSION: 0.11.0-dev.2646+3d33a0906
 
 jobs:
   build:
