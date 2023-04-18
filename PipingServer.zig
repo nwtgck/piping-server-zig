@@ -44,7 +44,7 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
 
     // Wait for header read
     try res.wait();
-    std.debug.print("{} {s}\n", .{ res.request.headers.method, res.request.headers.target });
+    std.debug.print("{s} {s}\n", .{ @tagName(res.request.headers.method), res.request.headers.target });
 
     const uri = try std.Uri.parseWithoutScheme(res.request.headers.target);
 
