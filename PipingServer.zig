@@ -102,14 +102,10 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
             _ = try receiver_res.write(buf[0..size]);
         }
         try receiver_res.finish();
-        // NOTE: Workaround of https://github.com/ziglang/zig/pull/15298
-        try receiver_res.connection.writeAll("\r\n");
         receiver_res.reset();
 
         _ = try res.write("[INFO] Sent successfully!\n");
         try res.finish();
-        // NOTE: Workaround of https://github.com/ziglang/zig/pull/15298
-        try res.connection.writeAll("\r\n");
         res.reset();
 
         return;
