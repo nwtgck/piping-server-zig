@@ -7,4 +7,5 @@
 zig run main.zig
 ```
 
-Use 0.11.0-dev.2582+25e3851fe for std.http.Server.
+Use master Zig version:  
+https://github.com/nwtgck/piping-server-zig/blob/develop/.github/workflows/ci.yml#L6
