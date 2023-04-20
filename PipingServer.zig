@@ -44,19 +44,16 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
 
     // Wait for header read
     try res.wait();
-    std.debug.print("{s} {s}\n", .{ @tagName(res.request.headers.method), res.request.headers.target });
+    std.debug.print("{s} {s}\n", .{ @tagName(res.request.method), res.request.target });
 
-    const uri = try std.Uri.parseWithoutScheme(res.request.headers.target);
+    const uri = try std.Uri.parseWithoutScheme(res.request.target);
 
     // Top page
-    if (res.request.headers.method == .GET and std.mem.eql(u8, uri.path, "/")) {
+    if (res.request.method == .GET and std.mem.eql(u8, uri.path, "/")) {
         const body: []const u8 = "Piping Server in Zig (experimental)\n";
-        res.headers.custom = &[_]std.http.CustomHeader{.{
-            .name = "Content-Type",
-            .value = "text/plain",
-        }};
-        res.headers.transfer_encoding = .{ .content_length = body.len };
-        res.headers.connection = res.request.headers.connection;
+        try res.headers.append("Content-Type", "text/plain");
+        try res.headers.append("Connection", "close");
+        res.transfer_encoding = .{ .content_length = body.len };
         // Send respose header
         try res.do();
         _ = try res.write(body);
@@ -66,11 +63,11 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     }
 
     // Handle sender
-    if (res.request.headers.method == .POST or res.request.headers.method == .PUT) {
-        std.debug.print("handling sender {s} ...\n", .{res.request.headers.target});
+    if (res.request.method == .POST or res.request.method == .PUT) {
+        std.debug.print("handling sender {s} ...\n", .{res.request.target});
         const pipe = try self.getPipe(uri.path);
-        res.headers.transfer_encoding = .chunked;
-        res.headers.connection = res.request.headers.connection;
+        res.transfer_encoding = .chunked;
+        try res.headers.append("Connection", "close");
         // Send respose header
         try res.do();
         _ = try res.write("[INFO] Waiting for 1 receiver(s)...\n");
@@ -80,12 +77,12 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
         _ = try res.write("[INFO] A receiver was connected.\n");
         _ = try res.write("[INFO] Start sending to 1 receiver(s)!\n");
 
-        if (res.request.headers.transfer_encoding == @as(?std.http.TransferEncoding, .chunked)) {
-            receiver_res.headers.transfer_encoding = .chunked;
-        } else if (res.request.headers.content_length) |sender_content_length| {
-            receiver_res.headers.transfer_encoding = .{ .content_length = sender_content_length };
+        if (res.request.transfer_encoding == @as(?std.http.TransferEncoding, .chunked)) {
+            receiver_res.transfer_encoding = .chunked;
+        } else if (res.request.content_length) |sender_content_length| {
+            receiver_res.transfer_encoding = .{ .content_length = sender_content_length };
         }
-        receiver_res.headers.connection = receiver_res.request.headers.connection;
+        try receiver_res.headers.append("Connection", "close");
         // TODO: Transfer Content-Type
         try receiver_res.do();
 
@@ -112,24 +109,21 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     }
 
     // Handle receiver
-    if (res.request.headers.method == .GET) {
-        std.debug.print("handling receiver {s} ...\n", .{res.request.headers.target});
+    if (res.request.method == .GET) {
+        std.debug.print("handling receiver {s} ...\n", .{res.request.target});
         const pipe = try self.getPipe(uri.path);
         pipe.receiver_res_channel.put(res);
         return;
     }
 }
 
-// TODO: Replace this entire function to the res.transferRead() if `piping-server-check --http1.1 --server-schemaless-url //localhost:8080 --check post_first_byte_by_byte_streaming` works
+// workaround of https://github.com/ziglang/zig/pull/15359
+// TODO: Replace this entire function to the res.read() if `piping-server-check --http1.1 --server-schemaless-url //localhost:8080 --check post_first_byte_by_byte_streaming` works
 fn workaroundTransferRead(res: *std.http.Server.Response, buf: []u8) !usize {
     if (res.request.parser.isComplete()) return 0;
 
     var index: usize = 0;
     while (index == 0) {
-        // Workaround of https://github.com/ziglang/zig/issues/15295
-        if (res.request.parser.done) {
-            res.request.parser.state = .finished;
-        }
         const amt = try res.request.parser.read(&res.connection, buf[index..], false);
         if (amt == 0 and res.request.parser.isComplete()) break;
         index += amt;
