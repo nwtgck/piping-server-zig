@@ -88,7 +88,7 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
 
         var buf: [65536]u8 = undefined;
         while (true) {
-            const size = workaroundTransferRead(res, &buf) catch |err| {
+            const size = res.read(&buf) catch |err| {
                 std.debug.print("read error: {}\n", .{err});
                 return err;
             };
@@ -115,19 +115,4 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
         pipe.receiver_res_channel.put(res);
         return;
     }
-}
-
-// workaround of https://github.com/ziglang/zig/pull/15359
-// TODO: Replace this entire function to the res.read() if `piping-server-check --http1.1 --server-schemaless-url //localhost:8080 --check post_first_byte_by_byte_streaming` works
-fn workaroundTransferRead(res: *std.http.Server.Response, buf: []u8) !usize {
-    if (res.request.parser.isComplete()) return 0;
-
-    var index: usize = 0;
-    while (index == 0) {
-        const amt = try res.request.parser.read(&res.connection, buf[index..], false);
-        if (amt == 0 and res.request.parser.isComplete()) break;
-        index += amt;
-    }
-
-    return index;
 }
