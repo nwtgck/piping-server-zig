@@ -19,12 +19,12 @@ jobs:
     - name: Test
       run: find . -name '*.zig' | xargs -I{} zig test {}
       timeout-minutes: 1
-    - run: zig build-exe main.zig
+    - run: zig build-exe -femit-bin=piping-server -O ReleaseSafe main.zig
     - name: Operational test
       run: |
         set -xeu
         # Start server
-        ./main &> server.log &
+        ./piping-server &> server.log &
         sleep 2
         curl -sS localhost:8080
 
