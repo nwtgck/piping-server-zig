@@ -1,36 +1,10 @@
 const std = @import("std");
 const BlockingChannel = @import("./blocking_channel.zig").BlockingChannel;
 
-fn RwLockWithValue(comptime T: type) type {
-    return struct {
-        rwlock: std.Thread.RwLock,
-        value: T,
-        fn init(value: T) @This() {
-            return .{ .value = value, .rwlock = std.Thread.RwLock{} };
-        }
-
-        fn lock(self: *@This()) void {
-            self.rwlock.lock();
-        }
-
-        fn unlock(self: *@This()) void {
-            self.rwlock.unlock();
-        }
-
-        fn lockShared(self: *@This()) void {
-            self.rwlock.lockShared();
-        }
-
-        fn unlockShared(self: *@This()) void {
-            self.rwlock.unlockShared();
-        }
-    };
-}
-
 const Pipe = struct {
     receiver_res_channel: *BlockingChannel(*std.http.Server.Response),
-    sender_connected: *RwLockWithValue(bool),
-    receiver_connected: *RwLockWithValue(bool),
+    sender_connected: bool,
+    receiver_connected: bool,
 };
 
 allocator: std.mem.Allocator,
@@ -52,14 +26,10 @@ fn getPipe(self: *@This(), path: []const u8) !Pipe {
     return self.path_to_pipe.get(path) orelse {
         const receiver_res_channel = try self.allocator.create(BlockingChannel(*std.http.Server.Response));
         receiver_res_channel.* = BlockingChannel(*std.http.Server.Response).init();
-        const sender_connected = try self.allocator.create(RwLockWithValue(bool));
-        sender_connected.* = RwLockWithValue(bool).init(false);
-        const receiver_connected = try self.allocator.create(RwLockWithValue(bool));
-        receiver_connected.* = RwLockWithValue(bool).init(false);
         const new_pipe = Pipe{
             .receiver_res_channel = receiver_res_channel,
-            .sender_connected = sender_connected,
-            .receiver_connected = receiver_connected,
+            .sender_connected = false,
+            .receiver_connected = false,
         };
         try self.path_to_pipe.put(path, new_pipe);
         return new_pipe;
@@ -73,8 +43,6 @@ fn removePipe(self: *@This(), path: []const u8) void {
     const pipe: ?Pipe = self.path_to_pipe.fetchRemove(path).?.value;
     if (pipe) |pipe2| {
         self.allocator.destroy(pipe2.receiver_res_channel);
-        self.allocator.destroy(pipe2.sender_connected);
-        self.allocator.destroy(pipe2.receiver_connected);
     }
 }
 
@@ -108,13 +76,14 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
         var pipe = try self.getPipe(uri.path);
 
         {
-            pipe.sender_connected.lock();
-            defer pipe.sender_connected.unlock();
-            if (pipe.sender_connected.value) {
+            // TODO: better lock
+            self.path_to_pipe_mutex.lock();
+            defer self.path_to_pipe_mutex.unlock();
+            if (pipe.sender_connected) {
                 try finishWithRejection(res, "[ERROR] Another sender has been connected.\n");
                 return;
             }
-            pipe.sender_connected.value = true;
+            pipe.sender_connected = true;
         }
 
         res.transfer_encoding = .chunked;
@@ -163,13 +132,14 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     if (res.request.method == .GET) {
         std.debug.print("handling receiver {s} ...\n", .{res.request.target});
         var pipe = try self.getPipe(uri.path);
-        pipe.receiver_connected.lock();
-        defer pipe.receiver_connected.unlock();
-        if (pipe.receiver_connected.value) {
+        // TODO: better lock
+        self.path_to_pipe_mutex.lock();
+        defer self.path_to_pipe_mutex.unlock();
+        if (pipe.receiver_connected) {
             try finishWithRejection(res, "[ERROR] The number of receivers has reached limits.\n");
             return;
         }
-        pipe.receiver_connected.value = true;
+        pipe.receiver_connected = true;
         pipe.receiver_res_channel.put(res);
         return;
     }
