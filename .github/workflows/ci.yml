@@ -4,9 +4,10 @@ on: [push]
 
 env:
   ZIG_VERSION: 0.11.0-dev.2830+295b8ca46
+  PIPING_SERVER_CHECK_VERSION: 0.13.1
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v3
@@ -36,3 +37,13 @@ jobs:
       timeout-minutes: 1
     - if: ${{ always() }}
       run: cat server.log
+    - name: Install piping-server-check
+      run: cd /tmp && wget -O piping-server-check.deb https://github.com/nwtgck/piping-server-check/releases/download/v${PIPING_SERVER_CHECK_VERSION}/piping-server-check-${PIPING_SERVER_CHECK_VERSION}-linux-amd64.deb && sudo dpkg -i piping-server-check.deb
+    - name: piping-server-check
+      run: piping-server-check --http1.1 --concurrency 100 --server-command="${SERVER_COMMAND}" --n-simultaneous-requests=10 --transfer-speed-byte $((1024 * 1024 * 1024 * 1024)) --transfer-span 3s --transfer-span 10s --transfer-span 30s --compromise post_first.same_path_sender_rejection --compromise post_first.content_type_forwarding --compromise get_first.content_type_forwarding --compromise put.same_path_sender_rejection --compromise put.content_type_forwarding --compromise get_cancel_get --compromise service_worker_registration_rejection --compromise multipart_form_data.content_type_forwarding --compromise multipart_form_data.content_disposition_forwarding --compromise multipart_form_data.transferred
+      env:
+        SERVER_COMMAND: 'mkdir -p /tmp/logs && exec ./piping-server $HTTP_PORT 2>&1 | tee /tmp/logs/$SERVER_RUN_ID.log > /dev/stderr'
+      timeout-minutes: 1
+    - name: Show server logs from piping-server-check
+      if: ${{ always() }}
+      run: tail -n +1 /tmp/logs/*
