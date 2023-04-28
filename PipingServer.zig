@@ -1,7 +1,37 @@
 const std = @import("std");
 const BlockingChannel = @import("./blocking_channel.zig").BlockingChannel;
 
-const Pipe = struct { receiver_res_channel: *BlockingChannel(*std.http.Server.Response) };
+fn RwLockWithValue(comptime T: type) type {
+    return struct {
+        rwlock: std.Thread.RwLock,
+        value: T,
+        fn init(value: T) @This() {
+            return .{ .value = value, .rwlock = std.Thread.RwLock{} };
+        }
+
+        fn lock(self: *@This()) void {
+            self.rwlock.lock();
+        }
+
+        fn unlock(self: *@This()) void {
+            self.rwlock.unlock();
+        }
+
+        fn lockShared(self: *@This()) void {
+            self.rwlock.lockShared();
+        }
+
+        fn unlockShared(self: *@This()) void {
+            self.rwlock.unlockShared();
+        }
+    };
+}
+
+const Pipe = struct {
+    receiver_res_channel: *BlockingChannel(*std.http.Server.Response),
+    sender_connected: *RwLockWithValue(bool),
+    receiver_connected: *RwLockWithValue(bool),
+};
 
 allocator: std.mem.Allocator,
 path_to_pipe: std.StringHashMap(Pipe),
@@ -20,9 +50,17 @@ fn getPipe(self: *@This(), path: []const u8) !Pipe {
     self.path_to_pipe_mutex.lock();
     defer self.path_to_pipe_mutex.unlock();
     return self.path_to_pipe.get(path) orelse {
-        const chan_ptr = try self.allocator.create(BlockingChannel(*std.http.Server.Response));
-        chan_ptr.* = BlockingChannel(*std.http.Server.Response).init();
-        const new_pipe = Pipe{ .receiver_res_channel = chan_ptr };
+        const receiver_res_channel = try self.allocator.create(BlockingChannel(*std.http.Server.Response));
+        receiver_res_channel.* = BlockingChannel(*std.http.Server.Response).init();
+        const sender_connected = try self.allocator.create(RwLockWithValue(bool));
+        sender_connected.* = RwLockWithValue(bool).init(false);
+        const receiver_connected = try self.allocator.create(RwLockWithValue(bool));
+        receiver_connected.* = RwLockWithValue(bool).init(false);
+        const new_pipe = Pipe{
+            .receiver_res_channel = receiver_res_channel,
+            .sender_connected = sender_connected,
+            .receiver_connected = receiver_connected,
+        };
         try self.path_to_pipe.put(path, new_pipe);
         return new_pipe;
     };
@@ -35,6 +73,8 @@ fn removePipe(self: *@This(), path: []const u8) void {
     const pipe: ?Pipe = self.path_to_pipe.fetchRemove(path).?.value;
     if (pipe) |pipe2| {
         self.allocator.destroy(pipe2.receiver_res_channel);
+        self.allocator.destroy(pipe2.sender_connected);
+        self.allocator.destroy(pipe2.receiver_connected);
     }
 }
 
@@ -65,7 +105,18 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     // Handle sender
     if (res.request.method == .POST or res.request.method == .PUT) {
         std.debug.print("handling sender {s} ...\n", .{res.request.target});
-        const pipe = try self.getPipe(uri.path);
+        var pipe = try self.getPipe(uri.path);
+
+        {
+            pipe.sender_connected.lock();
+            defer pipe.sender_connected.unlock();
+            if (pipe.sender_connected.value) {
+                try finishWithRejection(res, "[ERROR] Another sender has been connected.\n");
+                return;
+            }
+            pipe.sender_connected.value = true;
+        }
+
         res.transfer_encoding = .chunked;
         try res.headers.append("Connection", "close");
         // Send respose header
@@ -111,8 +162,28 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     // Handle receiver
     if (res.request.method == .GET) {
         std.debug.print("handling receiver {s} ...\n", .{res.request.target});
-        const pipe = try self.getPipe(uri.path);
+        var pipe = try self.getPipe(uri.path);
+        pipe.receiver_connected.lock();
+        defer pipe.receiver_connected.unlock();
+        if (pipe.receiver_connected.value) {
+            try finishWithRejection(res, "[ERROR] The number of receivers has reached limits.\n");
+            return;
+        }
+        pipe.receiver_connected.value = true;
         pipe.receiver_res_channel.put(res);
         return;
     }
+}
+
+fn finishWithRejection(res: *std.http.Server.Response, body: []const u8) !void {
+    try res.headers.append("Content-Type", "text/plain");
+    try res.headers.append("Connection", "close");
+    res.transfer_encoding = .{ .content_length = body.len };
+    res.status = .bad_request;
+    // Send respose header
+    try res.do();
+    // TODO: use .writeAll() after https://github.com/ziglang/zig/pull/15487 merged
+    _ = try res.write(body);
+    try res.finish();
+    res.reset();
 }
