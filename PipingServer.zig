@@ -8,25 +8,26 @@ const Pipe = struct {
 };
 
 allocator: std.mem.Allocator,
-path_to_pipe: std.StringHashMap(Pipe),
+path_to_pipe: std.StringHashMap(*Pipe),
 path_to_pipe_mutex: std.Thread.Mutex,
 
 pub fn init(allocator: std.mem.Allocator) @This() {
     return .{
         .allocator = allocator,
-        .path_to_pipe = std.StringHashMap(Pipe).init(allocator),
+        .path_to_pipe = std.StringHashMap(*Pipe).init(allocator),
         .path_to_pipe_mutex = std.Thread.Mutex{},
     };
 }
 
-fn getPipe(self: *@This(), path: []const u8) !Pipe {
+fn getPipe(self: *@This(), path: []const u8) !*Pipe {
     // TODO: better lock
     self.path_to_pipe_mutex.lock();
     defer self.path_to_pipe_mutex.unlock();
     return self.path_to_pipe.get(path) orelse {
         const receiver_res_channel = try self.allocator.create(BlockingChannel(*std.http.Server.Response));
         receiver_res_channel.* = BlockingChannel(*std.http.Server.Response).init();
-        const new_pipe = Pipe{
+        const new_pipe = try self.allocator.create(Pipe);
+        new_pipe.* = Pipe{
             .receiver_res_channel = receiver_res_channel,
             .sender_connected = false,
             .receiver_connected = false,
@@ -40,9 +41,10 @@ fn removePipe(self: *@This(), path: []const u8) void {
     // TODO: better lock
     self.path_to_pipe_mutex.lock();
     defer self.path_to_pipe_mutex.unlock();
-    const pipe: ?Pipe = self.path_to_pipe.fetchRemove(path).?.value;
+    const pipe: ?*Pipe = self.path_to_pipe.fetchRemove(path).?.value;
     if (pipe) |pipe2| {
         self.allocator.destroy(pipe2.receiver_res_channel);
+        self.allocator.destroy(pipe2);
     }
 }
 
