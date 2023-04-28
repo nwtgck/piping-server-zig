@@ -1,28 +1,35 @@
 const std = @import("std");
 const BlockingChannel = @import("./blocking_channel.zig").BlockingChannel;
 
-const Pipe = struct { receiver_res_channel: *BlockingChannel(*std.http.Server.Response) };
+const Pipe = struct {
+    receiver_res_channel: BlockingChannel(*std.http.Server.Response),
+    sender_connected: bool,
+    receiver_connected: bool,
+};
 
 allocator: std.mem.Allocator,
-path_to_pipe: std.StringHashMap(Pipe),
+path_to_pipe: std.StringHashMap(*Pipe),
 path_to_pipe_mutex: std.Thread.Mutex,
 
 pub fn init(allocator: std.mem.Allocator) @This() {
     return .{
         .allocator = allocator,
-        .path_to_pipe = std.StringHashMap(Pipe).init(allocator),
+        .path_to_pipe = std.StringHashMap(*Pipe).init(allocator),
         .path_to_pipe_mutex = std.Thread.Mutex{},
     };
 }
 
-fn getPipe(self: *@This(), path: []const u8) !Pipe {
+fn getPipe(self: *@This(), path: []const u8) !*Pipe {
     // TODO: better lock
     self.path_to_pipe_mutex.lock();
     defer self.path_to_pipe_mutex.unlock();
     return self.path_to_pipe.get(path) orelse {
-        const chan_ptr = try self.allocator.create(BlockingChannel(*std.http.Server.Response));
-        chan_ptr.* = BlockingChannel(*std.http.Server.Response).init();
-        const new_pipe = Pipe{ .receiver_res_channel = chan_ptr };
+        const new_pipe = try self.allocator.create(Pipe);
+        new_pipe.* = Pipe{
+            .receiver_res_channel = BlockingChannel(*std.http.Server.Response).init(),
+            .sender_connected = false,
+            .receiver_connected = false,
+        };
         try self.path_to_pipe.put(path, new_pipe);
         return new_pipe;
     };
@@ -32,9 +39,9 @@ fn removePipe(self: *@This(), path: []const u8) void {
     // TODO: better lock
     self.path_to_pipe_mutex.lock();
     defer self.path_to_pipe_mutex.unlock();
-    const pipe: ?Pipe = self.path_to_pipe.fetchRemove(path).?.value;
+    const pipe: ?*Pipe = self.path_to_pipe.fetchRemove(path).?.value;
     if (pipe) |pipe2| {
-        self.allocator.destroy(pipe2.receiver_res_channel);
+        self.allocator.destroy(pipe2);
     }
 }
 
@@ -65,7 +72,19 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     // Handle sender
     if (res.request.method == .POST or res.request.method == .PUT) {
         std.debug.print("handling sender {s} ...\n", .{res.request.target});
-        const pipe = try self.getPipe(uri.path);
+        var pipe = try self.getPipe(uri.path);
+
+        {
+            // TODO: better lock
+            self.path_to_pipe_mutex.lock();
+            defer self.path_to_pipe_mutex.unlock();
+            if (pipe.sender_connected) {
+                try finishWithRejection(res, "[ERROR] Another sender has been connected.\n");
+                return;
+            }
+            pipe.sender_connected = true;
+        }
+
         res.transfer_encoding = .chunked;
         try res.headers.append("Connection", "close");
         // Send respose header
@@ -111,8 +130,29 @@ pub fn handle(self: *@This(), res: *std.http.Server.Response) !void {
     // Handle receiver
     if (res.request.method == .GET) {
         std.debug.print("handling receiver {s} ...\n", .{res.request.target});
-        const pipe = try self.getPipe(uri.path);
+        var pipe = try self.getPipe(uri.path);
+        // TODO: better lock
+        self.path_to_pipe_mutex.lock();
+        defer self.path_to_pipe_mutex.unlock();
+        if (pipe.receiver_connected) {
+            try finishWithRejection(res, "[ERROR] The number of receivers has reached limits.\n");
+            return;
+        }
+        pipe.receiver_connected = true;
         pipe.receiver_res_channel.put(res);
         return;
     }
+}
+
+fn finishWithRejection(res: *std.http.Server.Response, body: []const u8) !void {
+    try res.headers.append("Content-Type", "text/plain");
+    try res.headers.append("Connection", "close");
+    res.transfer_encoding = .{ .content_length = body.len };
+    res.status = .bad_request;
+    // Send respose header
+    try res.do();
+    // TODO: use .writeAll() after https://github.com/ziglang/zig/pull/15487 merged
+    _ = try res.write(body);
+    try res.finish();
+    res.reset();
 }
