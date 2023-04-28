@@ -2,7 +2,7 @@ const std = @import("std");
 const BlockingChannel = @import("./blocking_channel.zig").BlockingChannel;
 
 const Pipe = struct {
-    receiver_res_channel: *BlockingChannel(*std.http.Server.Response),
+    receiver_res_channel: BlockingChannel(*std.http.Server.Response),
     sender_connected: bool,
     receiver_connected: bool,
 };
@@ -24,11 +24,9 @@ fn getPipe(self: *@This(), path: []const u8) !*Pipe {
     self.path_to_pipe_mutex.lock();
     defer self.path_to_pipe_mutex.unlock();
     return self.path_to_pipe.get(path) orelse {
-        const receiver_res_channel = try self.allocator.create(BlockingChannel(*std.http.Server.Response));
-        receiver_res_channel.* = BlockingChannel(*std.http.Server.Response).init();
         const new_pipe = try self.allocator.create(Pipe);
         new_pipe.* = Pipe{
-            .receiver_res_channel = receiver_res_channel,
+            .receiver_res_channel = BlockingChannel(*std.http.Server.Response).init(),
             .sender_connected = false,
             .receiver_connected = false,
         };
@@ -43,7 +41,6 @@ fn removePipe(self: *@This(), path: []const u8) void {
     defer self.path_to_pipe_mutex.unlock();
     const pipe: ?*Pipe = self.path_to_pipe.fetchRemove(path).?.value;
     if (pipe) |pipe2| {
-        self.allocator.destroy(pipe2.receiver_res_channel);
         self.allocator.destroy(pipe2);
     }
 }
