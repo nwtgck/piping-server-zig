@@ -3,7 +3,7 @@ name: CI
 on: [push]
 
 env:
-  ZIG_VERSION: 0.11.0-dev.2934+1b432072b
+  ZIG_VERSION: 0.11.0-dev.2938+e963793e3
   PIPING_SERVER_CHECK_VERSION: 0.13.1
 
 jobs:
